@@ -1,4 +1,3 @@
-````markdown
 # YouTube AI Automation – AI-Powered YouTube Video Publishing System
 
 YouTube AI Automation is an AI-powered video publishing application built using Python and Streamlit.
