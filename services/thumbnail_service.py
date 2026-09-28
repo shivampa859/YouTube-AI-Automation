@@ -133,7 +133,7 @@ Do not return:
     )
 
     interaction = client.interactions.create(
-        model="gemini-3.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         input=[
             {
                 "type": "video",
