@@ -98,14 +98,19 @@ def exchange_code_for_credentials(code, state=None):
 
     flow = create_oauth_flow()
 
-    flow.fetch_token(code=code)
+    if state:
+        flow.state = state
+
+    flow.fetch_token(
+        code=code
+    )
 
     return flow.credentials
-
 
 def get_connected_channel(credentials):
     """
     Get the YouTube channel connected through OAuth.
+    
     """
 
     youtube = build(

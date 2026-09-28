@@ -4,35 +4,28 @@ import os
 import json
 import hashlib
 import time
-from datetime import datetime, time
+from datetime import datetime, time as dt_time
 from streamlit_cookies_controller import CookieController
 
 from services.gemini_service import analyze_video
-
 from services.thumbnail_service import generate_thumbnail
-
 from services.youtube_service import (
     upload_video,
     set_thumbnail
 )
-
 from services.youtube_auth import (
     get_authorization_url,
     exchange_code_for_credentials,
     save_connected_channel
 )
-
 from services.mongodb_service import (
     get_youtube_connection
 )
-
 from utils.video_utils import (
     detect_aspect_ratio,
     convert_video_format
 )
 
-
-# Page configuration
 
 st.set_page_config(
     page_title="YouTube AI Automation",
@@ -41,12 +34,10 @@ st.set_page_config(
 )
 
 
-# Cookie controller
-
 cookie_controller = CookieController()
 
+OAUTH_STATE_COOKIE = "youtube_oauth_state"
 
-# Session state
 
 if "video_hash" not in st.session_state:
     st.session_state.video_hash = None
@@ -76,16 +67,10 @@ if "oauth_processed" not in st.session_state:
     st.session_state.oauth_processed = False
 
 
-# Get connection ID from browser cookie
-
 connection_id = cookie_controller.get(
     "youtube_connection_id"
 )
 
-
-# ------------------------------------------------
-# OAuth callback handling
-# ------------------------------------------------
 
 query_params = st.query_params
 
@@ -94,10 +79,7 @@ oauth_state = query_params.get("state")
 oauth_error = query_params.get("error")
 
 
-# Google returned an OAuth error
-
 if oauth_error:
-
     st.error(
         f"YouTube connection failed: {oauth_error}"
     )
@@ -107,26 +89,19 @@ if oauth_error:
     st.stop()
 
 
-# Google returned an authorization code
-
 if (
     oauth_code
     and not st.session_state.oauth_processed
 ):
-
     try:
-
-        # Validate OAuth state
-
-        saved_state = st.session_state.get(
-            "oauth_state"
+        saved_state = cookie_controller.get(
+            OAUTH_STATE_COOKIE
         )
 
         if (
             not saved_state
             or oauth_state != saved_state
         ):
-
             st.error(
                 "OAuth security validation failed. "
                 "Please start the connection again."
@@ -136,14 +111,9 @@ if (
 
             st.stop()
 
-
         with st.spinner(
             "Connecting your YouTube channel..."
         ):
-
-            # Exchange authorization code
-            # for Google credentials
-
             credentials = (
                 exchange_code_for_credentials(
                     oauth_code,
@@ -151,16 +121,9 @@ if (
                 )
             )
 
-
-            # Save channel + encrypted refresh token
-            # into MongoDB
-
             connection = save_connected_channel(
                 credentials
             )
-
-
-            # Store connection ID in browser cookie
 
             cookie_controller.set(
                 "youtube_connection_id",
@@ -168,9 +131,9 @@ if (
                 max_age=60 * 60 * 24 * 365
             )
 
-
-            # Store connection information
-            # in current Streamlit session
+            cookie_controller.remove(
+                OAUTH_STATE_COOKIE
+            )
 
             st.session_state.connection_id = (
                 connection["connection_id"]
@@ -186,9 +149,6 @@ if (
 
             st.session_state.oauth_processed = True
 
-            # Remove OAuth parameters
-            # from the browser URL
-
             st.query_params.clear()
 
             st.success(
@@ -199,9 +159,7 @@ if (
 
             st.rerun()
 
-
     except Exception as error:
-
         st.error(
             "Could not connect your YouTube channel."
         )
@@ -213,17 +171,11 @@ if (
         st.stop()
 
 
-# ------------------------------------------------
-# Restore existing connection
-# ------------------------------------------------
-
 youtube_connection = None
 
 
 if connection_id:
-
     try:
-
         youtube_connection = (
             get_youtube_connection(
                 connection_id
@@ -231,7 +183,6 @@ if connection_id:
         )
 
     except Exception as error:
-
         st.error(
             "Could not check your YouTube connection."
         )
@@ -241,12 +192,7 @@ if connection_id:
         st.stop()
 
 
-# ------------------------------------------------
-# Connect YouTube Channel
-# ------------------------------------------------
-
 if not youtube_connection:
-
     st.title(
         "YouTube AI Automation"
     )
@@ -261,16 +207,19 @@ if not youtube_connection:
         "before using the upload tools."
     )
 
-
     if st.button(
         "Connect YouTube Channel",
         width="stretch"
     ):
-
         try:
-
             authorization_url, state = (
                 get_authorization_url()
+            )
+
+            cookie_controller.set(
+                OAUTH_STATE_COOKIE,
+                state,
+                max_age=600
             )
 
             st.session_state.oauth_state = state
@@ -285,20 +234,14 @@ if not youtube_connection:
             )
 
         except Exception as error:
-
             st.error(
                 "Could not start YouTube authorization."
             )
 
             st.exception(error)
 
-
     st.stop()
 
-
-# ------------------------------------------------
-# Connected YouTube Channel
-# ------------------------------------------------
 
 channel_name = youtube_connection.get(
     "channel_name",
@@ -315,16 +258,13 @@ st.title(
     "YouTube AI Automation"
 )
 
-
 st.success(
     f"Connected YouTube Channel: **{channel_name}**"
 )
 
-
 st.caption(
     f"Channel ID: {channel_id}"
 )
-
 
 st.write(
     "Automatically analyze your video, generate "
@@ -333,10 +273,6 @@ st.write(
     "or schedule the video."
 )
 
-
-# ------------------------------------------------
-# Video upload
-# ------------------------------------------------
 
 st.subheader("Video")
 
@@ -352,32 +288,20 @@ uploaded_file = st.file_uploader(
 )
 
 
-# ------------------------------------------------
-# Video status
-# ------------------------------------------------
-
 if uploaded_file is None:
-
     st.info(
         "Upload a video to continue."
     )
 
 else:
-
-    # Create video hash
-
     current_video_hash = hashlib.md5(
         uploaded_file.getvalue()
     ).hexdigest()
-
-
-    # Reset state when video changes
 
     if (
         st.session_state.video_hash
         != current_video_hash
     ):
-
         st.session_state.video_hash = (
             current_video_hash
         )
@@ -398,30 +322,20 @@ else:
 
         st.session_state.metadata = None
 
-
         old_thumbnail = (
             "generated_thumbnail.png"
         )
 
-
         if os.path.exists(
             old_thumbnail
         ):
-
             try:
-
                 os.remove(
                     old_thumbnail
                 )
-
             except PermissionError:
-
                 pass
 
-
-    # ------------------------------------------------
-    # Video format
-    # ------------------------------------------------
 
     st.subheader(
         "Video Format"
@@ -445,7 +359,6 @@ else:
         uploaded_file.getbuffer()
     )
 
-
     preview_temp.close()
 
 
@@ -455,17 +368,14 @@ else:
 
 
     try:
-
         video_info = detect_aspect_ratio(
             preview_video_path
         )
 
     finally:
-
         if os.path.exists(
             preview_video_path
         ):
-
             os.remove(
                 preview_video_path
             )
@@ -490,10 +400,6 @@ else:
     )
 
 
-    # ------------------------------------------------
-    # Format selector
-    # ------------------------------------------------
-
     format_choice = st.selectbox(
         "Choose video format",
         [
@@ -505,29 +411,22 @@ else:
 
 
     if format_choice == "Auto Detect":
-
         st.success(
             "Original video format will be used."
         )
 
     elif format_choice == video_info["format"]:
-
         st.success(
             f"Video already matches "
             f"{format_choice}."
         )
 
     else:
-
         st.info(
             f"Video will be converted to "
             f"{format_choice}."
         )
 
-
-    # ------------------------------------------------
-    # AI thumbnail
-    # ------------------------------------------------
 
     st.subheader(
         "AI Thumbnail"
@@ -540,15 +439,12 @@ else:
     )
 
 
-    # Generate AI thumbnail
-
     if not st.session_state.ai_thumbnail_generated:
 
         if st.button(
             "Generate AI Thumbnail",
             width="stretch"
         ):
-
             thumbnail_video_temp = (
                 tempfile.NamedTemporaryFile(
                     delete=False,
@@ -556,33 +452,26 @@ else:
                 )
             )
 
-
             thumbnail_video_temp.write(
                 uploaded_file.getbuffer()
             )
 
-
             thumbnail_video_temp.close()
-
 
             thumbnail_video_path = (
                 thumbnail_video_temp.name
             )
 
-
             try:
-
                 with st.spinner(
                     "Gemini is analyzing the video and "
                     "Cloudflare is generating the thumbnail..."
                 ):
-
                     thumbnail_result = (
                         generate_thumbnail(
                             thumbnail_video_path
                         )
                     )
-
 
                 st.session_state.ai_thumbnail_path = (
                     thumbnail_result[
@@ -590,27 +479,21 @@ else:
                     ]
                 )
 
-
                 st.session_state.ai_thumbnail_generated = (
                     True
                 )
-
 
                 st.session_state.thumbnail_choice = (
                     "Use AI Thumbnail"
                 )
 
-
                 st.success(
                     "AI thumbnail generated successfully!"
                 )
 
-
                 st.rerun()
 
-
             except Exception as error:
-
                 st.error(
                     "AI thumbnail generation failed."
                 )
@@ -621,26 +504,18 @@ else:
                     "You can upload your own thumbnail instead."
                 )
 
-
                 st.session_state.thumbnail_choice = (
                     "Upload Custom Thumbnail"
                 )
 
-
             finally:
-
                 if os.path.exists(
                     thumbnail_video_path
                 ):
-
                     os.remove(
                         thumbnail_video_path
                     )
 
-
-    # ------------------------------------------------
-    # AI thumbnail preview
-    # ------------------------------------------------
 
     if (
         st.session_state.ai_thumbnail_generated
@@ -649,14 +524,11 @@ else:
             st.session_state.ai_thumbnail_path
         )
     ):
-
         st.markdown("---")
-
 
         st.subheader(
             "AI Thumbnail Preview"
         )
-
 
         st.image(
             st.session_state.ai_thumbnail_path,
@@ -664,18 +536,13 @@ else:
             width="stretch"
         )
 
-
         st.success(
             "Review the AI thumbnail above."
         )
 
-
-        # Thumbnail selection
-
         st.subheader(
             "Choose Thumbnail"
         )
-
 
         thumbnail_choice = st.radio(
             "Do you want to use the AI thumbnail "
@@ -693,26 +560,19 @@ else:
             key="thumbnail_selection"
         )
 
-
         st.session_state.thumbnail_choice = (
             thumbnail_choice
         )
 
-
-        # Custom thumbnail upload
-
         thumbnail_file = None
-
 
         if (
             thumbnail_choice
             == "Upload Custom Thumbnail"
         ):
-
             st.write(
                 "Upload your own thumbnail."
             )
-
 
             thumbnail_file = st.file_uploader(
                 "Choose your custom thumbnail",
@@ -724,13 +584,10 @@ else:
                 key="custom_thumbnail"
             )
 
-
             if thumbnail_file:
-
                 st.session_state.custom_thumbnail_uploaded = (
                     True
                 )
-
 
                 st.image(
                     thumbnail_file,
@@ -738,34 +595,23 @@ else:
                     width="stretch"
                 )
 
-
         else:
-
             thumbnail_file = None
 
-
     else:
-
         thumbnail_file = None
 
-
-    # ------------------------------------------------
-    # Fallback custom thumbnail
-    # ------------------------------------------------
 
     if (
         not st.session_state.ai_thumbnail_generated
         and st.session_state.thumbnail_choice
         == "Upload Custom Thumbnail"
     ):
-
         st.markdown("---")
-
 
         st.subheader(
             "Custom Thumbnail"
         )
-
 
         thumbnail_file = st.file_uploader(
             "Choose your custom thumbnail",
@@ -777,13 +623,10 @@ else:
             key="custom_thumbnail_fallback"
         )
 
-
         if thumbnail_file:
-
             st.session_state.custom_thumbnail_uploaded = (
                 True
             )
-
 
             st.image(
                 thumbnail_file,
@@ -792,14 +635,8 @@ else:
             )
 
 
-    # ------------------------------------------------
-    # YouTube configuration
-    # ------------------------------------------------
-
     st.markdown("---")
 
-
-    # YouTube visibility
 
     st.subheader(
         "YouTube Visibility"
@@ -816,10 +653,6 @@ else:
     )
 
 
-    # ------------------------------------------------
-    # Upload timing
-    # ------------------------------------------------
-
     st.subheader(
         "Upload Timing"
     )
@@ -835,24 +668,19 @@ else:
     )
 
 
-    # Schedule
-
     schedule_date = None
     schedule_time = None
 
 
     if upload_mode == "Schedule":
-
         schedule_date = st.date_input(
             "Schedule Date"
         )
 
-
         schedule_time = st.time_input(
             "Schedule Time",
-            value=time(20, 0)
+            value=dt_time(20, 0)
         )
-
 
         st.info(
             f"Video will be scheduled for "
@@ -860,16 +688,11 @@ else:
             f"{schedule_time.strftime('%I:%M %p')}"
         )
 
-
         st.warning(
             "Scheduled videos are uploaded as private "
             "and published at the scheduled time."
         )
 
-
-    # ------------------------------------------------
-    # YouTube metadata
-    # ------------------------------------------------
 
     st.subheader(
         "YouTube Metadata"
@@ -880,7 +703,6 @@ else:
         "Generate Metadata",
         width="stretch"
     ):
-
         metadata_video_temp = (
             tempfile.NamedTemporaryFile(
                 delete=False,
@@ -888,91 +710,66 @@ else:
             )
         )
 
-
         metadata_video_temp.write(
             uploaded_file.getbuffer()
         )
 
-
         metadata_video_temp.close()
-
 
         metadata_video_path = (
             metadata_video_temp.name
         )
 
-
         try:
-
             st.info(
                 "Generating YouTube metadata..."
             )
-
 
             metadata_text = analyze_video(
                 metadata_video_path
             )
 
-
             try:
-
                 metadata = json.loads(
                     metadata_text
                 )
 
-
             except json.JSONDecodeError:
-
                 st.error(
                     "Gemini returned invalid JSON."
                 )
-
 
                 st.code(
                     metadata_text
                 )
 
-
                 st.stop()
 
-
             st.session_state.metadata = metadata
-
 
             st.session_state.metadata_generated = (
                 True
             )
 
-
             st.success(
                 "Metadata generated!"
             )
 
-
         except Exception as error:
-
             st.error(
                 "Metadata generation failed."
             )
 
-
             st.exception(error)
 
-
         finally:
-
             if os.path.exists(
                 metadata_video_path
             ):
-
                 os.remove(
                     metadata_video_path
                 )
 
-
-    # ------------------------------------------------
-    # Edit metadata
-    # ------------------------------------------------
 
     if st.session_state.metadata_generated:
 
@@ -980,27 +777,22 @@ else:
             st.session_state.metadata
         )
 
-
         st.markdown("---")
-
 
         st.write(
             "Edit the metadata before uploading."
         )
-
 
         edited_title = st.text_input(
             "Title",
             value=metadata["title"]
         )
 
-
         edited_description = st.text_area(
             "Description",
             value=metadata["description"],
             height=200
         )
-
 
         edited_tags = st.text_input(
             "Tags",
@@ -1009,28 +801,19 @@ else:
             )
         )
 
-
-        # ------------------------------------------------
-        # Process and upload
-        # ------------------------------------------------
-
         st.subheader(
             "Upload"
         )
-
 
         if st.button(
             "Process & Upload to YouTube",
             width="stretch"
         ):
 
-            # Validate thumbnail selection
-
             if (
                 st.session_state.thumbnail_choice
                 is None
             ):
-
                 st.error(
                     "Please choose a thumbnail."
                 )
@@ -1038,14 +821,11 @@ else:
                 st.stop()
 
 
-            # Validate custom thumbnail
-
             if (
                 st.session_state.thumbnail_choice
                 == "Upload Custom Thumbnail"
                 and thumbnail_file is None
             ):
-
                 st.error(
                     "Please upload your custom thumbnail."
                 )
@@ -1053,17 +833,13 @@ else:
                 st.stop()
 
 
-            # Save edited metadata
-
             metadata["title"] = (
                 edited_title
             )
 
-
             metadata["description"] = (
                 edited_description
             )
-
 
             metadata["tags"] = [
                 tag.strip()
@@ -1072,8 +848,6 @@ else:
             ]
 
 
-            # Save video temporarily
-
             video_temp = (
                 tempfile.NamedTemporaryFile(
                     delete=False,
@@ -1081,29 +855,21 @@ else:
                 )
             )
 
-
             video_temp.write(
                 uploaded_file.getbuffer()
             )
 
-
             video_temp.close()
-
 
             video_path = (
                 video_temp.name
             )
-
 
             converted_video_path = None
             thumbnail_path = None
 
 
             try:
-
-                # ------------------------------------------------
-                # Video conversion
-                # ------------------------------------------------
 
                 if (
                     format_choice != "Auto Detect"
@@ -1116,7 +882,6 @@ else:
                         f"{format_choice}..."
                     )
 
-
                     converted_temp = (
                         tempfile.NamedTemporaryFile(
                             delete=False,
@@ -1124,14 +889,11 @@ else:
                         )
                     )
 
-
                     converted_temp.close()
-
 
                     converted_video_path = (
                         converted_temp.name
                     )
-
 
                     convert_video_format(
                         video_path,
@@ -1139,32 +901,23 @@ else:
                         format_choice
                     )
 
-
                     if os.path.exists(
                         video_path
                     ):
-
                         os.remove(
                             video_path
                         )
-
 
                     video_path = (
                         converted_video_path
                     )
 
-
                     converted_video_path = None
-
 
                     st.success(
                         "Video conversion completed!"
                     )
 
-
-                # ------------------------------------------------
-                # Prepare thumbnail
-                # ------------------------------------------------
 
                 if (
                     st.session_state.thumbnail_choice
@@ -1175,7 +928,6 @@ else:
                         st.session_state.ai_thumbnail_path
                     )
 
-
                 else:
 
                     thumbnail_extension = (
@@ -1184,7 +936,6 @@ else:
                         )[1]
                     )
 
-
                     thumbnail_temp = (
                         tempfile.NamedTemporaryFile(
                             delete=False,
@@ -1192,23 +943,16 @@ else:
                         )
                     )
 
-
                     thumbnail_temp.write(
                         thumbnail_file.getbuffer()
                     )
 
-
                     thumbnail_temp.close()
-
 
                     thumbnail_path = (
                         thumbnail_temp.name
                     )
 
-
-                # ------------------------------------------------
-                # Schedule
-                # ------------------------------------------------
 
                 publish_at = None
 
@@ -1222,25 +966,11 @@ else:
                         )
                     )
 
-
                     publish_at = (
                         selected_datetime.isoformat()
                         + "+05:30"
                     )
 
-
-                # ------------------------------------------------
-                # IMPORTANT
-                # ------------------------------------------------
-                #
-                # The current youtube_service.py still uses
-                # YOUTUBE_TOKEN_JSON internally.
-                #
-                # We will change that service next so that
-                # this upload uses the connected user's
-                # MongoDB credentials.
-                #
-                # ------------------------------------------------
 
                 st.info(
                     "The YouTube connection is ready. "
@@ -1248,13 +978,11 @@ else:
                     "switched to the connected account."
                 )
 
-
                 st.warning(
                     "Upload is temporarily disabled while "
                     "the multi-user YouTube authentication "
                     "is being connected."
                 )
-
 
                 st.stop()
 
@@ -1265,7 +993,6 @@ else:
                     "Something went wrong."
                 )
 
-
                 st.exception(error)
 
 
@@ -1274,11 +1001,9 @@ else:
                 if os.path.exists(
                     video_path
                 ):
-
                     os.remove(
                         video_path
                     )
-
 
                 if (
                     converted_video_path
@@ -1286,11 +1011,9 @@ else:
                         converted_video_path
                     )
                 ):
-
                     os.remove(
                         converted_video_path
                     )
-
 
                 if (
                     thumbnail_path
@@ -1300,15 +1023,10 @@ else:
                         thumbnail_path
                     )
                 ):
-
                     os.remove(
                         thumbnail_path
                     )
 
-
-# ------------------------------------------------
-# Upload history
-# ------------------------------------------------
 
 st.markdown("---")
 
@@ -1326,9 +1044,7 @@ def load_upload_history():
     if not os.path.exists(
         HISTORY_FILE
     ):
-
         return []
-
 
     try:
 
@@ -1342,20 +1058,15 @@ def load_upload_history():
                 file
             )
 
-
         if isinstance(
             history,
             list
         ):
-
             return history
-
 
         return []
 
-
     except Exception:
-
         return []
 
 
@@ -1388,7 +1099,6 @@ if not upload_history:
         "No videos uploaded yet."
     )
 
-
 else:
 
     for item in reversed(
@@ -1404,24 +1114,20 @@ else:
                 f"{item.get('title', 'Untitled')}"
             )
 
-
             st.write(
                 f"Uploaded: "
                 f"{item.get('date', 'Unknown date')}"
             )
-
 
             st.write(
                 f"Status: "
                 f"**{item.get('status', 'Unknown')}**"
             )
 
-
             st.write(
                 f"Visibility: "
                 f"**{item.get('visibility', 'Unknown')}**"
             )
-
 
             if item.get(
                 "scheduled_for"
@@ -1432,12 +1138,10 @@ else:
                     f"**{item.get('scheduled_for')}**"
                 )
 
-
             st.write(
                 f"Video ID: "
                 f"`{item.get('video_id', 'Unknown')}`"
             )
-
 
             if item.get(
                 "url"
