@@ -8,50 +8,225 @@ from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 
+from services.mongodb_service import get_youtube_connection
 
-SCOPES = ["https://www.googleapis.com/auth/youtube"]
+
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube"
+]
 
 
 # ============================================================
 # YouTube credentials
 # ============================================================
 
-def get_credentials():
+def get_credentials(connection_id=None):
     """
     Get YouTube OAuth credentials.
 
-    Priority:
+    Multi-user mode:
+        If connection_id is provided, load the user's
+        encrypted refresh token from MongoDB.
 
-    1. YOUTUBE_TOKEN_JSON environment variable
-       - Used for Docker / Hugging Face deployment.
+    Legacy mode:
+        If connection_id is not provided, fall back to
+        YOUTUBE_TOKEN_JSON or local token.json.
 
-    2. Local token.json
-       - Used during local development.
-
-    3. Local credentials/client_secret.json
-       - Used to perform the initial OAuth login locally.
-
-    The actual OAuth credentials should never be committed
-    to GitHub or included directly inside the Docker image.
+    This allows us to test the new multi-user system
+    without immediately breaking the existing system.
     """
 
     credentials = None
 
-    # --------------------------------------------------------
-    # 1. Try token from environment variable
-    # --------------------------------------------------------
+    # ========================================================
+    # 1. Multi-user MongoDB mode
+    # ========================================================
 
-    token_json = os.getenv("YOUTUBE_TOKEN_JSON")
+    if connection_id:
+
+        print(
+            "Loading YouTube connection from MongoDB..."
+        )
+
+        connection = get_youtube_connection(
+            connection_id
+        )
+
+        if not connection:
+
+            raise RuntimeError(
+                "YouTube connection was not found in MongoDB."
+            )
+
+        refresh_token = connection.get(
+            "refresh_token"
+        )
+
+        if not refresh_token:
+
+            raise RuntimeError(
+                "YouTube refresh token was not found "
+                "for this connection."
+            )
+
+        # ----------------------------------------------------
+        # Get OAuth client configuration
+        # ----------------------------------------------------
+
+        client_config_json = None
+
+        # Try Streamlit Secrets first
+        try:
+
+            import streamlit as st
+
+            if "YOUTUBE_CLIENT_CONFIG_JSON" in st.secrets:
+
+                client_config_json = (
+                    st.secrets[
+                        "YOUTUBE_CLIENT_CONFIG_JSON"
+                    ]
+                )
+
+        except Exception:
+
+            pass
+
+        # Fall back to environment variable
+
+        if not client_config_json:
+
+            client_config_json = os.getenv(
+                "YOUTUBE_CLIENT_CONFIG_JSON"
+            )
+
+        if not client_config_json:
+
+            raise RuntimeError(
+                "YOUTUBE_CLIENT_CONFIG_JSON is not configured."
+            )
+
+        try:
+
+            client_config = json.loads(
+                client_config_json
+            )
+
+        except Exception as error:
+
+            raise RuntimeError(
+                "YOUTUBE_CLIENT_CONFIG_JSON contains "
+                "invalid JSON."
+            ) from error
+
+        # ----------------------------------------------------
+        # Extract OAuth client information
+        # ----------------------------------------------------
+
+        if "web" in client_config:
+
+            client_data = client_config["web"]
+
+        elif "installed" in client_config:
+
+            client_data = client_config["installed"]
+
+        else:
+
+            raise RuntimeError(
+                "Invalid Google OAuth client configuration."
+            )
+
+        client_id = client_data.get(
+            "client_id"
+        )
+
+        client_secret = client_data.get(
+            "client_secret"
+        )
+
+        token_uri = client_data.get(
+            "token_uri",
+            "https://oauth2.googleapis.com/token"
+        )
+
+        if not client_id:
+
+            raise RuntimeError(
+                "OAuth client_id is missing."
+            )
+
+        if not client_secret:
+
+            raise RuntimeError(
+                "OAuth client_secret is missing."
+            )
+
+        # ----------------------------------------------------
+        # Create credentials from refresh token
+        # ----------------------------------------------------
+
+        credentials = Credentials(
+
+            token=None,
+
+            refresh_token=refresh_token,
+
+            token_uri=token_uri,
+
+            client_id=client_id,
+
+            client_secret=client_secret,
+
+            scopes=SCOPES
+        )
+
+        # ----------------------------------------------------
+        # Refresh access token
+        # ----------------------------------------------------
+
+        try:
+
+            credentials.refresh(
+                Request()
+            )
+
+            print(
+                "YouTube access token refreshed "
+                "from MongoDB connection."
+            )
+
+        except Exception as error:
+
+            raise RuntimeError(
+                "Could not refresh the YouTube access token. "
+                "The stored refresh token may have been "
+                "revoked or expired."
+            ) from error
+
+        return credentials
+
+    # ========================================================
+    # 2. Legacy YOUTUBE_TOKEN_JSON mode
+    # ========================================================
+
+    token_json = os.getenv(
+        "YOUTUBE_TOKEN_JSON"
+    )
 
     if token_json:
 
         try:
 
-            token_data = json.loads(token_json)
+            token_data = json.loads(
+                token_json
+            )
 
-            credentials = Credentials.from_authorized_user_info(
-                token_data,
-                SCOPES
+            credentials = (
+                Credentials.from_authorized_user_info(
+                    token_data,
+                    SCOPES
+                )
             )
 
             print(
@@ -62,29 +237,32 @@ def get_credentials():
         except Exception as error:
 
             raise RuntimeError(
-                "YOUTUBE_TOKEN_JSON is present but invalid. "
-                "Make sure it contains the complete contents "
-                "of your token.json file."
+                "YOUTUBE_TOKEN_JSON is present but invalid."
             ) from error
 
-    # --------------------------------------------------------
-    # 2. Try local token.json
-    # --------------------------------------------------------
+    # ========================================================
+    # 3. Local token.json
+    # ========================================================
 
-    if credentials is None and os.path.exists("token.json"):
+    if (
+        credentials is None
+        and os.path.exists("token.json")
+    ):
 
         print(
             "Loading YouTube credentials from token.json..."
         )
 
-        credentials = Credentials.from_authorized_user_file(
-            "token.json",
-            SCOPES
+        credentials = (
+            Credentials.from_authorized_user_file(
+                "token.json",
+                SCOPES
+            )
         )
 
-    # --------------------------------------------------------
-    # 3. Refresh expired credentials
-    # --------------------------------------------------------
+    # ========================================================
+    # 4. Refresh legacy credentials
+    # ========================================================
 
     if credentials and credentials.expired:
 
@@ -111,31 +289,24 @@ def get_credentials():
             except Exception as error:
 
                 raise RuntimeError(
-                    "Could not refresh the YouTube OAuth token. "
-                    "The refresh token may have expired or been revoked."
+                    "Could not refresh the YouTube OAuth token."
                 ) from error
 
         else:
 
             credentials = None
 
-    # --------------------------------------------------------
-    # 4. If credentials are valid, return them
-    # --------------------------------------------------------
+    # ========================================================
+    # 5. Return valid legacy credentials
+    # ========================================================
 
     if credentials and credentials.valid:
 
         return credentials
 
-    # --------------------------------------------------------
-    # 5. Local OAuth login
-    # --------------------------------------------------------
-    #
-    # This is intended for local development.
-    #
-    # Docker / Hugging Face deployments should provide
-    # YOUTUBE_TOKEN_JSON instead.
-    # --------------------------------------------------------
+    # ========================================================
+    # 6. Local OAuth login
+    # ========================================================
 
     client_config_json = os.getenv(
         "YOUTUBE_CLIENT_CONFIG_JSON"
@@ -169,7 +340,9 @@ def get_credentials():
             SCOPES
         )
 
-    elif os.path.exists(local_client_secret):
+    elif os.path.exists(
+        local_client_secret
+    ):
 
         print(
             "Using local credentials/client_secret.json..."
@@ -188,9 +361,9 @@ def get_credentials():
             "For local development:\n"
             "  Put your OAuth file at:\n"
             "  credentials/client_secret.json\n\n"
-            "For Docker / Hugging Face:\n"
-            "  Add YOUTUBE_TOKEN_JSON as a secret/environment variable.\n"
-            "  It should contain the complete contents of token.json.\n"
+            "For deployment:\n"
+            "  Configure YOUTUBE_TOKEN_JSON or "
+            "use the multi-user connection flow.\n"
         )
 
     print(
@@ -202,7 +375,7 @@ def get_credentials():
     )
 
     # --------------------------------------------------------
-    # Save token locally when running outside deployment
+    # Save local token
     # --------------------------------------------------------
 
     try:
@@ -239,10 +412,15 @@ def upload_video(
     metadata,
     privacy_status="private",
     publish_at=None,
-    progress_callback=None
+    progress_callback=None,
+    connection_id=None
 ):
     """
     Upload a video to YouTube.
+
+    connection_id:
+        MongoDB connection ID for the user whose
+        YouTube channel should receive the upload.
 
     privacy_status:
         private
@@ -262,7 +440,9 @@ def upload_video(
         "Connecting to YouTube..."
     )
 
-    credentials = get_credentials()
+    credentials = get_credentials(
+        connection_id=connection_id
+    )
 
     youtube = build(
         "youtube",
@@ -434,11 +614,16 @@ def upload_video(
 
 def set_thumbnail(
     video_id,
-    thumbnail_path
+    thumbnail_path,
+    connection_id=None
 ):
     """
-    Uploads a custom thumbnail to YouTube
-    and verifies that YouTube registered it.
+    Upload a custom thumbnail to YouTube
+    and verify that YouTube registered it.
+
+    connection_id:
+        MongoDB connection ID for the user's
+        YouTube channel.
     """
 
     print(
@@ -510,7 +695,9 @@ def set_thumbnail(
     # Get credentials
     # --------------------------------------------------------
 
-    credentials = get_credentials()
+    credentials = get_credentials(
+        connection_id=connection_id
+    )
 
     youtube = build(
         "youtube",
@@ -639,8 +826,8 @@ def set_thumbnail(
     )
 
     print(
-        "YouTube accepted the thumbnail request,"
-        " but hasCustomThumbnail is not yet true."
+        "YouTube accepted the thumbnail request, "
+        "but hasCustomThumbnail is not yet true."
     )
 
     print(
