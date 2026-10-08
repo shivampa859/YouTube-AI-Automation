@@ -12,10 +12,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 SCOPES = ["https://www.googleapis.com/auth/youtube"]
 
 
-# ============================================================
-# YouTube credentials
-# ============================================================
-
 def get_credentials():
     """
     Get YouTube OAuth credentials.
@@ -36,11 +32,6 @@ def get_credentials():
     """
 
     credentials = None
-
-    # --------------------------------------------------------
-    # 1. Try token from environment variable
-    # --------------------------------------------------------
-
     token_json = os.getenv("YOUTUBE_TOKEN_JSON")
 
     if token_json:
@@ -67,9 +58,6 @@ def get_credentials():
                 "of your token.json file."
             ) from error
 
-    # --------------------------------------------------------
-    # 2. Try local token.json
-    # --------------------------------------------------------
 
     if credentials is None and os.path.exists("token.json"):
 
@@ -82,9 +70,6 @@ def get_credentials():
             SCOPES
         )
 
-    # --------------------------------------------------------
-    # 3. Refresh expired credentials
-    # --------------------------------------------------------
 
     if credentials and credentials.expired:
 
@@ -119,23 +104,12 @@ def get_credentials():
 
             credentials = None
 
-    # --------------------------------------------------------
-    # 4. If credentials are valid, return them
-    # --------------------------------------------------------
+
 
     if credentials and credentials.valid:
 
         return credentials
 
-    # --------------------------------------------------------
-    # 5. Local OAuth login
-    # --------------------------------------------------------
-    #
-    # This is intended for local development.
-    #
-    # Docker / Hugging Face deployments should provide
-    # YOUTUBE_TOKEN_JSON instead.
-    # --------------------------------------------------------
 
     client_config_json = os.getenv(
         "YOUTUBE_CLIENT_CONFIG_JSON"
@@ -200,9 +174,6 @@ def get_credentials():
     credentials = flow.run_local_server(
         port=0
     )
-
-    # --------------------------------------------------------
-    # Save token locally when running outside deployment
     # --------------------------------------------------------
 
     try:
@@ -229,10 +200,6 @@ def get_credentials():
 
     return credentials
 
-
-# ============================================================
-# Upload video
-# ============================================================
 
 def upload_video(
     video_path,
@@ -270,28 +237,18 @@ def upload_video(
         credentials=credentials
     )
 
-    # --------------------------------------------------------
-    # Video status
-    # --------------------------------------------------------
+
 
     status = {
         "privacyStatus": privacy_status
     }
 
-    # --------------------------------------------------------
-    # Scheduled video
-    # --------------------------------------------------------
 
     if publish_at:
 
         status["privacyStatus"] = "private"
 
         status["publishAt"] = publish_at
-
-    # --------------------------------------------------------
-    # Request body
-    # --------------------------------------------------------
-
     request_body = {
 
         "snippet": {
@@ -313,10 +270,6 @@ def upload_video(
             status
     }
 
-    # --------------------------------------------------------
-    # Video media
-    # --------------------------------------------------------
-
     media = MediaFileUpload(
 
         video_path,
@@ -326,9 +279,6 @@ def upload_video(
         resumable=True
     )
 
-    # --------------------------------------------------------
-    # Create upload request
-    # --------------------------------------------------------
 
     print(
         "Uploading video to YouTube..."
@@ -343,9 +293,6 @@ def upload_video(
         media_body=media
     )
 
-    # --------------------------------------------------------
-    # Upload video
-    # --------------------------------------------------------
 
     response = None
 
@@ -366,9 +313,6 @@ def upload_video(
 
             raise
 
-        # ----------------------------------------------------
-        # Update progress
-        # ----------------------------------------------------
 
         if status_progress:
 
@@ -387,15 +331,9 @@ def upload_video(
                     progress
                 )
 
-    # --------------------------------------------------------
-    # Get video ID
-    # --------------------------------------------------------
 
     video_id = response["id"]
 
-    # --------------------------------------------------------
-    # Complete upload
-    # --------------------------------------------------------
 
     if progress_callback:
 
@@ -428,9 +366,6 @@ def upload_video(
     return video_id
 
 
-# ============================================================
-# Set custom thumbnail
-# ============================================================
 
 def set_thumbnail(
     video_id,
@@ -445,10 +380,6 @@ def set_thumbnail(
         "\nUploading custom thumbnail..."
     )
 
-    # --------------------------------------------------------
-    # Validate thumbnail file
-    # --------------------------------------------------------
-
     if not os.path.exists(
         thumbnail_path
     ):
@@ -458,17 +389,11 @@ def set_thumbnail(
             f"{thumbnail_path}"
         )
 
-    # --------------------------------------------------------
-    # Get file extension
-    # --------------------------------------------------------
 
     extension = os.path.splitext(
         thumbnail_path
     )[1].lower()
 
-    # --------------------------------------------------------
-    # Determine MIME type
-    # --------------------------------------------------------
 
     if extension in [
         ".jpg",
@@ -487,9 +412,6 @@ def set_thumbnail(
             "Thumbnail must be JPG, JPEG, or PNG."
         )
 
-    # --------------------------------------------------------
-    # Check file size
-    # --------------------------------------------------------
 
     file_size = os.path.getsize(
         thumbnail_path
@@ -506,9 +428,6 @@ def set_thumbnail(
         "bytes"
     )
 
-    # --------------------------------------------------------
-    # Get credentials
-    # --------------------------------------------------------
 
     credentials = get_credentials()
 
@@ -518,9 +437,6 @@ def set_thumbnail(
         credentials=credentials
     )
 
-    # --------------------------------------------------------
-    # Create media
-    # --------------------------------------------------------
 
     media = MediaFileUpload(
 
@@ -531,9 +447,6 @@ def set_thumbnail(
         resumable=True
     )
 
-    # --------------------------------------------------------
-    # Upload thumbnail
-    # --------------------------------------------------------
 
     print(
         "Sending thumbnail to YouTube..."
@@ -548,9 +461,6 @@ def set_thumbnail(
 
     response = request.execute()
 
-    # --------------------------------------------------------
-    # Check response
-    # --------------------------------------------------------
 
     if not response:
 
@@ -561,10 +471,6 @@ def set_thumbnail(
     print(
         "YouTube accepted the thumbnail upload."
     )
-
-    # --------------------------------------------------------
-    # Verify thumbnail
-    # --------------------------------------------------------
 
     print(
         "Verifying custom thumbnail..."
@@ -601,10 +507,6 @@ def set_thumbnail(
         False
     )
 
-    # --------------------------------------------------------
-    # Check verification result
-    # --------------------------------------------------------
-
     if has_custom_thumbnail:
 
         print(
@@ -626,9 +528,6 @@ def set_thumbnail(
 
         return True
 
-    # --------------------------------------------------------
-    # Thumbnail not verified yet
-    # --------------------------------------------------------
 
     print(
         "\n================================"

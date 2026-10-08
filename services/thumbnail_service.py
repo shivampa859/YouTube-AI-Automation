@@ -473,6 +473,10 @@ def generate_thumbnail(
     4. Cloudflare generates the image.
     5. Image is converted to the correct ratio.
 
+    Rules:
+        - Approximately 16:9 -> 16:9 thumbnail.
+        - Anything else -> 9:16 thumbnail.
+
     Returns:
         {
             "video_format": ...,
@@ -510,21 +514,23 @@ def generate_thumbnail(
 
 
     # Convert format name
+    #
+    # Only 16:9 stays 16:9.
+    # Every other format becomes 9:16.
 
     if detected_format == "16:9 Landscape":
 
         aspect_ratio = "16:9"
 
-    elif detected_format == "9:16 Vertical":
+    else:
 
         aspect_ratio = "9:16"
 
-    else:
 
-        raise ValueError(
-            "The video must be approximately "
-            "16:9 or 9:16 for AI thumbnail generation."
-        )
+    print(
+        "Thumbnail aspect ratio:",
+        aspect_ratio
+    )
 
 
     # Generate prompt with Gemini

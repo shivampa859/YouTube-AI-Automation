@@ -1,6 +1,11 @@
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import streamlit as st
 import tempfile
-import os
 import json
 import hashlib
 from datetime import datetime, time
