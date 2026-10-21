@@ -513,17 +513,20 @@ def generate_thumbnail(
     )
 
 
-    # Convert format name
-    #
-    # Only 16:9 stays 16:9.
-    # Every other format becomes 9:16.
+    # Choose the supported aspect ratio closest to the video's dimensions.
+    width = video_info["width"]
+    height = video_info["height"]
 
-    if detected_format == "16:9 Landscape":
+    if width <= 0 or height <= 0:
+        raise ValueError("Video width and height must be positive.")
 
+    video_ratio = width / height
+    landscape_ratio = 16 / 9
+    vertical_ratio = 9 / 16
+
+    if abs(video_ratio - landscape_ratio) <= abs(video_ratio - vertical_ratio):
         aspect_ratio = "16:9"
-
     else:
-
         aspect_ratio = "9:16"
 
 
